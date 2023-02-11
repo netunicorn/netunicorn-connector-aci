@@ -100,9 +100,10 @@ class AzureContainerInstances(NetunicornConnectorProtocol):
 
                     if not group_is_running:
                         self.logger.info(f"Deleting container group {group.name}")
-                        self.client.container_groups.delete(
-                            self.resource_group_name, group.name
-                        )
+                        self.client.container_groups.begin_delete(
+                            resource_group_name=self.resource_group_name,
+                            container_group_name=group.name,
+                        ).result()
 
             except Exception as e:
                 self.logger.error(f"Error while cleaning container groups: {e}")
