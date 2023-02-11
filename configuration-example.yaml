@@ -1,0 +1,7 @@
+---
+netunicorn.azure.tenant.id: "00000000-0000-0000-0000-000000000000"
+netunicorn.azure.client.id: "00000000-0000-0000-0000-000000000000"
+netunicorn.azure.client.secret: "00000000000000000000000"
+netunicorn.azure.subscription.id: "00000000-0000-0000-0000-000000000000"
+netunicorn.azure.resource.group: "netunicorn"
+netunicorn.azure.location: "westus3"  # azure region
