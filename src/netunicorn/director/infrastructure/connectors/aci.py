@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Optional
 
 import yaml
 import logging
@@ -24,7 +25,7 @@ from netunicorn.director.infrastructure.connectors.types import StopExecutorRequ
 
 class AzureContainerInstances(NetunicornConnectorProtocol):
     def __init__(
-        self, connector_name: str, config_file: str | None, netunicorn_gateway: str
+        self, connector_name: str, config_file: str | None, netunicorn_gateway: str, logger: Optional[logging.Logger] = None,
     ):
         self.connector_name = connector_name
         self.netunicorn_gateway = netunicorn_gateway
@@ -65,8 +66,12 @@ class AzureContainerInstances(NetunicornConnectorProtocol):
             ), subscription_id=self.subscription_id
         )
 
-        logging.basicConfig()
-        self.logger = logging.getLogger(__name__)
+        if not logger:
+            logging.basicConfig()
+            logger = logging.getLogger(__name__)
+            logger.setLevel(logging.INFO)
+
+        self.logger = logger
 
         self.tasks: list[asyncio.Task] = []
 
