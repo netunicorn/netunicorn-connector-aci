@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Optional
+from typing import Optional, NoReturn, Tuple, Iterable, Any
 
 import yaml
 import logging
@@ -10,6 +10,7 @@ import os
 
 from azure.identity import ClientSecretCredential
 from azure.mgmt.containerinstance import ContainerInstanceManagementClient
+from azure.mgmt.containerinstance.models import ContainerGroup
 from netunicorn.base.architecture import Architecture
 
 from netunicorn.base.deployment import Deployment
@@ -23,14 +24,16 @@ from netunicorn.director.infrastructure.connectors.protocol import (
 from netunicorn.director.infrastructure.connectors.types import StopExecutorRequest
 
 
-class AzureContainerInstances(NetunicornConnectorProtocol):
+class AzureContainerInstances(NetunicornConnectorProtocol):  # type: ignore
     def __init__(
         self, connector_name: str, config_file: str | None, netunicorn_gateway: str, logger: Optional[logging.Logger] = None,
     ):
         self.connector_name = connector_name
         self.netunicorn_gateway = netunicorn_gateway
-        with open(config_file, "r") as f:
-            self.config = yaml.safe_load(f)
+
+        if config_file is not None:
+            with open(config_file, "r") as f:
+                self.config = yaml.safe_load(f)
 
         self.azure_tenant_id = (
             os.environ.get("NETUNICORN_AZURE_TENANT_ID", None)
@@ -73,9 +76,7 @@ class AzureContainerInstances(NetunicornConnectorProtocol):
 
         self.logger = logger
 
-        self.tasks: list[asyncio.Task] = []
-
-    async def __cleaner(self):
+    async def __cleaner(self) -> NoReturn:
         """
         This is a temporary crutch for removing container groups for finished experiments.
         Yes, I'm ashamed of myself.
@@ -87,18 +88,20 @@ class AzureContainerInstances(NetunicornConnectorProtocol):
         self.logger.info("Starting Azure Container Instances cleaner")
         while True:
             try:
-                container_groups = self.client.container_groups.list_by_resource_group(
+                container_groups: Iterable[ContainerGroup] = self.client.container_groups.list_by_resource_group(
                     self.resource_group_name
                 )
 
                 # if all containers in the group are not running, delete the group
                 for group in container_groups:
+                    group_name: str = group.name  # type: ignore
+                    group_containers: list[Container] = group.containers  # type: ignore
                     # https://github.com/Azure/azure-rest-api-specs/issues/21280
                     group = self.client.container_groups.get(
-                        self.resource_group_name, group.name
+                        self.resource_group_name, group_name
                     )
                     group_is_running = False
-                    for container in group.containers:
+                    for container in group_containers:
                         if container.instance_view.current_state.state == "Running":
                             group_is_running = True
                             break
@@ -107,7 +110,7 @@ class AzureContainerInstances(NetunicornConnectorProtocol):
                         self.logger.info(f"Deleting container group {group.name}")
                         self.client.container_groups.begin_delete(
                             resource_group_name=self.resource_group_name,
-                            container_group_name=group.name,
+                            container_group_name=group_name,
                         ).result()
 
             except Exception as e:
@@ -115,9 +118,9 @@ class AzureContainerInstances(NetunicornConnectorProtocol):
             await asyncio.sleep(30)
 
     async def initialize(self) -> None:
-        self.tasks.append(asyncio.create_task(self.__cleaner()))
+        asyncio.create_task(self.__cleaner())
 
-    async def health(self) -> (bool, str):
+    async def health(self) -> Tuple[bool, str]:
         return True, "Cannot check if Azure Container Instances is healthy"
 
     async def shutdown(self) -> None:
@@ -146,7 +149,7 @@ class AzureContainerInstances(NetunicornConnectorProtocol):
         as it is the only type supported by Azure Container Instances.
         """
 
-        result = {}
+        result: dict[str, Result[None, str]] = {}
         for deployment in deployments:
             if not deployment.prepared:
                 result[deployment.executor_id] = Failure("Deployment is not prepared")
@@ -168,7 +171,7 @@ class AzureContainerInstances(NetunicornConnectorProtocol):
     async def execute(
         self, username: str, experiment_id: str, deployments: list[Deployment]
     ) -> dict[str, Result[None, str]]:
-        container_groups = {}
+        container_groups: dict[str, dict[str, Any]] = {}
         for deployment in deployments:
             deployment.environment_definition.runtime_context.environment_variables[
                 "NETUNICORN_EXECUTOR_ID"
@@ -206,7 +209,7 @@ class AzureContainerInstances(NetunicornConnectorProtocol):
         # noinspection PyTypeChecker
         # trust me
         values: tuple[Exception | Result[None, str], ...] = await asyncio.gather(*[
-            self._create_container_group(key, value) for key, value in container_groups.items()
+            self._create_container_group(key, value) for key, value in container_groups.items()  # type: ignore
         ], return_exceptions=True)
 
         results = {}
@@ -219,7 +222,7 @@ class AzureContainerInstances(NetunicornConnectorProtocol):
         return results
 
     async def _create_container_group(
-        self, executor_id: str, group: dict
+        self, executor_id: str, group: ContainerGroup
     ) -> Result[None, str]:
         self.logger.debug(f"Creating container group {executor_id}")
         loop = asyncio.get_running_loop()
