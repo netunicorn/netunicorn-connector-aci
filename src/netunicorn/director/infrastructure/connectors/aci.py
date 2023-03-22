@@ -126,7 +126,7 @@ class AzureContainerInstances(NetunicornConnectorProtocol):  # type: ignore
     async def shutdown(self) -> None:
         pass
 
-    async def get_nodes(self, username: str) -> UncountableNodePool:
+    async def get_nodes(self, username: str, *args, **kwargs) -> UncountableNodePool:
         available_node_types = [
             Node(
                 name="aci-",
@@ -140,7 +140,7 @@ class AzureContainerInstances(NetunicornConnectorProtocol):  # type: ignore
         return UncountableNodePool(node_template=available_node_types)
 
     async def deploy(
-        self, username: str, experiment_id: str, deployments: list[Deployment]
+        self, username: str, experiment_id: str, deployments: list[Deployment], *args, **kwargs
     ) -> dict[str, Result[None, str]]:
         """
         Azure Container Instances automatically starts the container when it is created
@@ -169,7 +169,7 @@ class AzureContainerInstances(NetunicornConnectorProtocol):  # type: ignore
         return result
 
     async def execute(
-        self, username: str, experiment_id: str, deployments: list[Deployment]
+        self, username: str, experiment_id: str, deployments: list[Deployment], *args, **kwargs
     ) -> dict[str, Result[None, str]]:
         container_groups: dict[str, dict[str, Any]] = {}
         for deployment in deployments:
@@ -239,7 +239,7 @@ class AzureContainerInstances(NetunicornConnectorProtocol):  # type: ignore
             return Failure(str(e))
 
     async def stop_executors(
-        self, username: str, requests_list: list[StopExecutorRequest]
+        self, username: str, requests_list: list[StopExecutorRequest], *args, **kwargs
     ) -> dict[str, Result[None, str]]:
         self.logger.warning("Stop executors called, but not implemented")
         return {request["executor_id"]: Failure("Stop executor is not implemented") for request in requests_list}
