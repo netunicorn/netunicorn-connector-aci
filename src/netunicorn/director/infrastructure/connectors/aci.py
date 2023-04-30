@@ -18,15 +18,19 @@ from netunicorn.base.environment_definitions import DockerImage
 from netunicorn.base.nodes import Node, UncountableNodePool
 from returns.result import Result, Success, Failure
 
-from netunicorn.director.infrastructure.connectors.protocol import (
+from netunicorn.director.base.connectors.protocol import (
     NetunicornConnectorProtocol,
 )
-from netunicorn.director.infrastructure.connectors.types import StopExecutorRequest
+from netunicorn.director.base.connectors.types import StopExecutorRequest
 
 
-class AzureContainerInstances(NetunicornConnectorProtocol):  # type: ignore
+class AzureContainerInstances(NetunicornConnectorProtocol):
     def __init__(
-        self, connector_name: str, config_file: str | None, netunicorn_gateway: str, logger: Optional[logging.Logger] = None,
+        self,
+        connector_name: str,
+        config_file: str | None,
+        netunicorn_gateway: str,
+        logger: Optional[logging.Logger] = None,
     ):
         self.connector_name = connector_name
         self.netunicorn_gateway = netunicorn_gateway
@@ -66,7 +70,8 @@ class AzureContainerInstances(NetunicornConnectorProtocol):  # type: ignore
                 tenant_id=self.azure_tenant_id,
                 client_id=self.azure_client_id,
                 client_secret=self.azure_client_secret,
-            ), subscription_id=self.subscription_id
+            ),
+            subscription_id=self.subscription_id,
         )
 
         if not logger:
@@ -78,17 +83,16 @@ class AzureContainerInstances(NetunicornConnectorProtocol):  # type: ignore
 
     async def __cleaner(self) -> NoReturn:
         """
-        This is a temporary crutch for removing container groups for finished experiments.
-        Yes, I'm ashamed of myself.
-        But it's better than nothing for now, I'll implement a proper system-level finalization later.
-
-        Theoretically, Azure Container Instances wouldn't charge for the container groups that are not running,
-        but just in case.
+        This is a backup cleaner that will delete all container groups that are not running.
+        These groups should be deleted by cleanup, but something can go wrong and we want
+        to avoid having orphaned container groups.
         """
         self.logger.info("Starting Azure Container Instances cleaner")
         while True:
             try:
-                container_groups: Iterable[ContainerGroup] = self.client.container_groups.list_by_resource_group(
+                container_groups: Iterable[
+                    ContainerGroup
+                ] = self.client.container_groups.list_by_resource_group(
                     self.resource_group_name
                 )
 
@@ -126,7 +130,13 @@ class AzureContainerInstances(NetunicornConnectorProtocol):  # type: ignore
     async def shutdown(self) -> None:
         pass
 
-    async def get_nodes(self, username: str, *args, **kwargs) -> UncountableNodePool:
+    async def get_nodes(
+            self,
+            username: str,
+            authentication_context: Optional[dict[str, str]] = None,
+            *args: Any,
+            **kwargs: Any,
+    ) -> UncountableNodePool:
         available_node_types = [
             Node(
                 name="aci-",
@@ -134,14 +144,21 @@ class AzureContainerInstances(NetunicornConnectorProtocol):  # type: ignore
                 properties={
                     "memory_in_gb": 1,
                     "cpu": 1,
-                }
+                },
             )
         ]
         return UncountableNodePool(node_template=available_node_types)
 
     async def deploy(
-        self, username: str, experiment_id: str, deployments: list[Deployment], *args, **kwargs
-    ) -> dict[str, Result[None, str]]:
+        self,
+        username: str,
+        experiment_id: str,
+        deployments: list[Deployment],
+        deployment_context: Optional[dict[str, str]],
+        authentication_context: Optional[dict[str, str]] = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> dict[str, Result[Optional[str], str]]:
         """
         Azure Container Instances automatically starts the container when it is created
         (seriously: https://stackoverflow.com/questions/67385581/deploying-azure-container-s-without-running-them),
@@ -149,7 +166,7 @@ class AzureContainerInstances(NetunicornConnectorProtocol):  # type: ignore
         as it is the only type supported by Azure Container Instances.
         """
 
-        result: dict[str, Result[None, str]] = {}
+        result: dict[str, Result[Optional[str], str]] = {}
         for deployment in deployments:
             if not deployment.prepared:
                 result[deployment.executor_id] = Failure("Deployment is not prepared")
@@ -169,10 +186,19 @@ class AzureContainerInstances(NetunicornConnectorProtocol):  # type: ignore
         return result
 
     async def execute(
-        self, username: str, experiment_id: str, deployments: list[Deployment], *args, **kwargs
-    ) -> dict[str, Result[None, str]]:
+        self,
+        username: str,
+        experiment_id: str,
+        deployments: list[Deployment],
+        execution_context: Optional[dict[str, str]],
+        authentication_context: Optional[dict[str, str]] = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> dict[str, Result[Optional[str], str]]:
         container_groups: dict[str, dict[str, Any]] = {}
         for deployment in deployments:
+            if not isinstance(deployment.environment_definition, DockerImage):
+                continue
             deployment.environment_definition.runtime_context.environment_variables[
                 "NETUNICORN_EXECUTOR_ID"
             ] = deployment.executor_id
@@ -196,10 +222,14 @@ class AzureContainerInstances(NetunicornConnectorProtocol):  # type: ignore
                         "name": deployment.executor_id,
                         "image": deployment.environment_definition.image,
                         "environment_variables": environment_variables,
-                        "resources": {"requests": {
-                            "memory_in_gb": deployment.node.properties.get("memory_in_gb", 1),
-                            "cpu": deployment.node.properties.get("cpu", 1),
-                        }},
+                        "resources": {
+                            "requests": {
+                                "memory_in_gb": deployment.node.properties.get(
+                                    "memory_in_gb", 1
+                                ),
+                                "cpu": deployment.node.properties.get("cpu", 1),
+                            }
+                        },
                     }
                 ],
             }
@@ -208,13 +238,16 @@ class AzureContainerInstances(NetunicornConnectorProtocol):  # type: ignore
 
         # noinspection PyTypeChecker
         # trust me
-        values: tuple[Exception | Result[None, str], ...] = await asyncio.gather(*[
-            self._create_container_group(key, value) for key, value in container_groups.items()  # type: ignore
-        ], return_exceptions=True)
+        values: tuple[Exception | Result[None, str], ...] = await asyncio.gather(
+            *[
+                self._create_container_group(key, value) for key, value in container_groups.items()  # type: ignore
+            ],
+            return_exceptions=True,
+        )
 
         results = {}
         for i, key in enumerate(container_groups.keys()):
-            value: Exception | Result[None, str] = values[i]
+            value: Exception | Result[Optional[str], str] = values[i]
             if isinstance(value, Exception):
                 value = Failure(str(value))
             results[key] = value
@@ -239,7 +272,34 @@ class AzureContainerInstances(NetunicornConnectorProtocol):  # type: ignore
             return Failure(str(e))
 
     async def stop_executors(
-        self, username: str, requests_list: list[StopExecutorRequest], *args, **kwargs
-    ) -> dict[str, Result[None, str]]:
+        self,
+        username: str,
+        requests_list: list[StopExecutorRequest],
+        cancellation_context: Optional[dict[str, str]],
+        authentication_context: Optional[dict[str, str]] = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> dict[str, Result[Optional[str], str]]:
         self.logger.warning("Stop executors called, but not implemented")
-        return {request["executor_id"]: Failure("Stop executor is not implemented") for request in requests_list}
+        return {
+            request["executor_id"]: Failure("Stop executor is not implemented")
+            for request in requests_list
+        }
+
+    async def cleanup(
+        self,
+        experiment_id: str,
+        deployments: list[Deployment],
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+
+        for deployment in deployments:
+            # try to delete the container group
+            try:
+                self.client.container_groups.begin_delete(
+                    resource_group_name=self.resource_group_name,
+                    container_group_name=deployment.executor_id,
+                )
+            except Exception as e:
+                self.logger.error(f"Error while deleting container group: {e}")
