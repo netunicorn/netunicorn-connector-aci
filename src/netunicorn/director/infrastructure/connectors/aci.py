@@ -144,6 +144,7 @@ class AzureContainerInstances(NetunicornConnectorProtocol):
                 properties={
                     "memory_in_gb": 1,
                     "cpu": 1,
+                    "netunicorn-environments": {"DockerImage"}
                 },
             )
         ]
