@@ -139,7 +139,7 @@ class AzureContainerInstances(NetunicornConnectorProtocol):
     ) -> UncountableNodePool:
         available_node_types = [
             Node(
-                name="aci-",
+                name=f"aci-{username}-",
                 architecture=Architecture.LINUX_AMD64,
                 properties={
                     "memory_in_gb": 1,
