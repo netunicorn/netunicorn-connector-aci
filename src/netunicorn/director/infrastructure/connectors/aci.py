@@ -64,6 +64,9 @@ class AzureContainerInstances(NetunicornConnectorProtocol):
             or self.config["netunicorn.azure.location"]
         )
 
+        self.netunicorn_access_tags = self.config["netunicorn.azure.access.tags"]
+        self.soft_limit = self.config["netunicorn.azure.soft_limit"]
+
         # noinspection PyTypeChecker
         self.client = ContainerInstanceManagementClient(
             credential=ClientSecretCredential(
@@ -122,7 +125,7 @@ class AzureContainerInstances(NetunicornConnectorProtocol):
             await asyncio.sleep(30)
 
     async def initialize(self) -> None:
-        asyncio.create_task(self.__cleaner())
+        await asyncio.create_task(self.__cleaner())
 
     async def health(self) -> Tuple[bool, str]:
         return True, "Cannot check if Azure Container Instances is healthy"
@@ -144,11 +147,12 @@ class AzureContainerInstances(NetunicornConnectorProtocol):
                 properties={
                     "memory_in_gb": 1,
                     "cpu": 1,
-                    "netunicorn-environments": {"DockerImage"}
+                    "netunicorn-environments": {"DockerImage"},
+                    "netunicorn-access-tags": self.netunicorn_access_tags,
                 },
             )
         ]
-        return UncountableNodePool(node_template=available_node_types)
+        return UncountableNodePool(node_template=available_node_types, soft_limit=self.soft_limit)
 
     async def deploy(
         self,
